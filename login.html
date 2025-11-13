@@ -237,263 +237,210 @@
     </footer>
 
     <script src="js/main.js"></script>
-    <script>
-        // Toggle between login and signup forms
-        function toggleAuthForm() {
-            const loginForm = document.getElementById('loginForm');
-            const signupForm = document.getElementById('signupForm');
-            
-            if (loginForm.style.display === 'none') {
-                loginForm.style.display = 'block';
-                signupForm.style.display = 'none';
-            } else {
-                loginForm.style.display = 'none';
-                signupForm.style.display = 'block';
-            }
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-app.js";
+  import { 
+    getAuth, 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword,
+    onAuthStateChanged
+  } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-auth.js";
+  import {
+    getFirestore,
+    doc,
+    setDoc,
+    getDoc
+  } from "https://www.gstatic.com/firebasejs/11.0.0/firebase-firestore.js";
+
+  // ✅ 1. Your Firebase config (copy from Firebase console)
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  // ✅ 2. Init Firebase
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  // Simple helper to show messages
+  function notify(msg) {
+    if (typeof showNotification === "function") {
+      showNotification(msg);
+    } else {
+      alert(msg);
+    }
+  }
+
+  // Keep your toggle function the same
+  window.toggleAuthForm = function () {
+    const loginForm = document.getElementById('loginForm');
+    const signupForm = document.getElementById('signupForm');
+    if (loginForm.style.display === 'none') {
+      loginForm.style.display = 'block';
+      signupForm.style.display = 'none';
+    } else {
+      loginForm.style.display = 'none';
+      signupForm.style.display = 'block';
+    }
+  };
+
+  // Dummy Google handler so the button doesn’t break (optional)
+  window.handleGoogleSignIn = function () {
+    notify("Google login is not connected yet. Email & password login works for this project.");
+  };
+
+  // ✅ 3. SIGNUP with Firebase
+  const signupFormEl = document.getElementById('signupFormElement');
+  const signupBtn = document.getElementById('signupBtn');
+
+  signupFormEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const firstName = document.getElementById('signupFirstName').value;
+    const lastName = document.getElementById('signupLastName').value;
+    const email = document.getElementById('signupEmail').value;
+    const password = document.getElementById('signupPassword').value;
+    const confirmPassword = document.getElementById('signupConfirmPassword').value;
+    const termsAccepted = document.getElementById('signupTerms').checked;
+
+    if (password !== confirmPassword) {
+      notify('Passwords do not match!');
+      return;
+    }
+    if (password.length < 8) {
+      notify('Password must be at least 8 characters');
+      return;
+    }
+    if (!termsAccepted) {
+      notify('Please accept the Terms & Conditions');
+      return;
+    }
+
+    signupBtn.disabled = true;
+    signupBtn.textContent = 'Creating Account...';
+
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password);
+
+      // Store extra data in Firestore
+      await setDoc(doc(db, 'users', cred.user.uid), {
+        first_name: firstName,
+        last_name: lastName,
+        email: email,
+        createdAt: new Date().toISOString()
+      });
+
+      // Save local "session" like before
+      const session = {
+        uid: cred.user.uid,
+        first_name: firstName,
+        last_name: lastName,
+        email: email,
+        loggedIn: true,
+        loginMethod: 'email',
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('userSession', JSON.stringify(session));
+
+      if (typeof trackEvent === 'function') {
+        trackEvent('signup_success', { method: 'email' });
+      }
+
+      notify('Account created successfully!');
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      notify(err.message || 'Registration failed');
+      signupBtn.disabled = false;
+      signupBtn.textContent = 'Create Account';
+    }
+  });
+
+  // ✅ 4. LOGIN with Firebase
+  const loginFormEl = document.getElementById('loginFormElement');
+  const loginBtn = document.getElementById('loginBtn');
+
+  loginFormEl.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const email = document.getElementById('loginEmail').value;
+    const password = document.getElementById('loginPassword').value;
+
+    loginBtn.disabled = true;
+    loginBtn.textContent = 'Logging in...';
+
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email, password);
+
+      // Try to read profile from Firestore
+      let firstName = '';
+      let lastName = '';
+      try {
+        const snap = await getDoc(doc(db, 'users', cred.user.uid));
+        if (snap.exists()) {
+          const data = snap.data();
+          firstName = data.first_name || '';
+          lastName = data.last_name || '';
         }
+      } catch (e) {
+        console.warn('Profile read error:', e);
+      }
 
-        // Handle Google Sign-In
-        function handleGoogleSignIn(response) {
-            // Decode the JWT token
-            const credential = response.credential;
-            const payload = parseJwt(credential);
-            
-            // Extract user information
-            const googleData = {
-                token: credential,
-                google_id: payload.sub,
-                email: payload.email,
-                first_name: payload.given_name || '',
-                last_name: payload.family_name || '',
-                picture: payload.picture || ''
-            };
+      const session = {
+        uid: cred.user.uid,
+        first_name: firstName,
+        last_name: lastName,
+        email: cred.user.email,
+        loggedIn: true,
+        loginMethod: 'email',
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('userSession', JSON.stringify(session));
 
-            // Send to backend
-            fetch('php/auth.php?action=google-login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(googleData)
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification(data.message || 'Login successful!');
-                    
-                    // Store user session
-                    localStorage.setItem('userSession', JSON.stringify({
-                        ...data.user,
-                        loggedIn: true,
-                        loginMethod: 'google',
-                        timestamp: new Date().toISOString()
-                    }));
-                    
-                    // Track event
-                    if (typeof trackEvent === 'function') {
-                        trackEvent('login_success', { method: 'google' });
-                    }
-                    
-                    // Redirect to home
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 1500);
-                } else {
-                    showNotification(data.error || 'Google login failed');
-                }
-            })
-            .catch(error => {
-                console.error('Google login error:', error);
-                showNotification('An error occurred during Google login');
-            });
-        }
+      if (typeof trackEvent === 'function') {
+        trackEvent('login_success', { method: 'email' });
+      }
 
-        // Parse JWT token
-        function parseJwt(token) {
-            try {
-                const base64Url = token.split('.')[1];
-                const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
-                const jsonPayload = decodeURIComponent(atob(base64).split('').map(function(c) {
-                    return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
-                }).join(''));
-                return JSON.parse(jsonPayload);
-            } catch (e) {
-                console.error('Error parsing JWT:', e);
-                return {};
-            }
-        }
+      notify('Login successful!');
+      setTimeout(() => {
+        window.location.href = 'index.html';
+      }, 1500);
+    } catch (err) {
+      console.error(err);
+      notify(err.message || 'Login failed');
+      loginBtn.disabled = false;
+      loginBtn.textContent = 'Login';
+    }
+  });
 
-        // Login Form Submission
-        document.getElementById('loginFormElement').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const email = document.getElementById('loginEmail').value;
-            const password = document.getElementById('loginPassword').value;
-            const remember = document.getElementById('loginRemember').checked;
-            const loginBtn = document.getElementById('loginBtn');
-            
-            // Disable button and show loading
-            loginBtn.disabled = true;
-            loginBtn.textContent = 'Logging in...';
-            
-            // Send to backend
-            fetch('php/auth.php?action=login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    email: email,
-                    password: password,
-                    remember: remember
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification(data.message || 'Login successful!');
-                    
-                    // Store user session
-                    localStorage.setItem('userSession', JSON.stringify({
-                        ...data.user,
-                        loggedIn: true,
-                        loginMethod: 'email',
-                        timestamp: new Date().toISOString()
-                    }));
-                    
-                    // Track event
-                    if (typeof trackEvent === 'function') {
-                        trackEvent('login_success', { method: 'email' });
-                    }
-                    
-                    // Redirect to home
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 1500);
-                } else {
-                    showNotification(data.error || 'Login failed');
-                    loginBtn.disabled = false;
-                    loginBtn.textContent = 'Login';
-                }
-            })
-            .catch(error => {
-                console.error('Login error:', error);
-                showNotification('An error occurred during login');
-                loginBtn.disabled = false;
-                loginBtn.textContent = 'Login';
-            });
-        });
+  // ✅ 5. If already logged in, redirect away from login page
+  window.addEventListener('DOMContentLoaded', () => {
+    const stored = localStorage.getItem('userSession');
+    if (!stored) return;
 
-        // Signup Form Submission
-        document.getElementById('signupFormElement').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const firstName = document.getElementById('signupFirstName').value;
-            const lastName = document.getElementById('signupLastName').value;
-            const email = document.getElementById('signupEmail').value;
-            const password = document.getElementById('signupPassword').value;
-            const confirmPassword = document.getElementById('signupConfirmPassword').value;
-            const termsAccepted = document.getElementById('signupTerms').checked;
-            const signupBtn = document.getElementById('signupBtn');
-            
-            // Validate passwords match
-            if (password !== confirmPassword) {
-                showNotification('Passwords do not match!');
-                return;
-            }
-            
-            // Validate password length
-            if (password.length < 8) {
-                showNotification('Password must be at least 8 characters');
-                return;
-            }
-            
-            // Validate terms accepted
-            if (!termsAccepted) {
-                showNotification('Please accept the Terms & Conditions');
-                return;
-            }
-            
-            // Disable button and show loading
-            signupBtn.disabled = true;
-            signupBtn.textContent = 'Creating Account...';
-            
-            // Send to backend
-            fetch('php/auth.php?action=register', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    first_name: firstName,
-                    last_name: lastName,
-                    email: email,
-                    password: password,
-                    confirm_password: confirmPassword
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    showNotification(data.message || 'Account created successfully!');
-                    
-                    // Store user session
-                    localStorage.setItem('userSession', JSON.stringify({
-                        ...data.user,
-                        loggedIn: true,
-                        loginMethod: 'email',
-                        timestamp: new Date().toISOString()
-                    }));
-                    
-                    // Track event
-                    if (typeof trackEvent === 'function') {
-                        trackEvent('signup_success', { method: 'email' });
-                    }
-                    
-                    // Redirect to home
-                    setTimeout(() => {
-                        window.location.href = 'index.html';
-                    }, 1500);
-                } else {
-                    showNotification(data.error || 'Registration failed');
-                    signupBtn.disabled = false;
-                    signupBtn.textContent = 'Create Account';
-                }
-            })
-            .catch(error => {
-                console.error('Signup error:', error);
-                showNotification('An error occurred during registration');
-                signupBtn.disabled = false;
-                signupBtn.textContent = 'Create Account';
-            });
-        });
+    try {
+      const session = JSON.parse(stored);
+      if (session.loggedIn) {
+        window.location.href = 'index.html';
+      }
+    } catch (e) {
+      console.error('Session parse error:', e);
+    }
+  });
 
-        // Check if already logged in
-        window.addEventListener('DOMContentLoaded', function() {
-            const userSession = localStorage.getItem('userSession');
-            if (userSession) {
-                try {
-                    const session = JSON.parse(userSession);
-                    if (session.loggedIn) {
-                        // Verify session with backend
-                        fetch('php/auth.php?action=check-session')
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.logged_in) {
-                                // Already logged in, redirect to home
-                                window.location.href = 'index.html';
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Session check error:', error);
-                        });
-                    }
-                } catch (e) {
-                    console.error('Error parsing session:', e);
-                }
-            }
-        });
-    </script>
+  // (Optional) React to auth state changes if you need later
+  onAuthStateChanged(auth, (user) => {
+    console.log('Auth state changed, user:', user?.email || null);
+  });
+</script>
+
     <style>
         .auth-section {
             padding: 4rem 0;
